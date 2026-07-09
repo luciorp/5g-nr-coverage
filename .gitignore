@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.terrain_cache/
+test_output/
+minha_antena/
+*.egg-info/
+.venv/
+venv/
+*.html
+*_overlay.png
