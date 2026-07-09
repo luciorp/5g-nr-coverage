@@ -39,6 +39,9 @@ enxuto como este.
 
 ## Instalação
 
+Requer Python 3.10+. Passo a passo completo (incluindo o que fazer se não
+tiver Python instalado) em **[docs/GUIDE.md](docs/GUIDE.md#pré-requisitos-e-instalação)**.
+
 ```
 pip install -r requirements.txt
 ```
@@ -61,6 +64,11 @@ python -m coverage_tool.cli \
 ```
 
 Abra o `coverage_map.html` gerado em qualquer navegador.
+
+📖 **Guia completo, com explicação detalhada de cada parâmetro e um
+exemplo real de ponta a ponta (RU Benetel RAN650 + antenas setorial e
+onidirecional da Alpha Wireless):
+[docs/GUIDE.md](docs/GUIDE.md)**
 
 ### Parâmetros principais
 
