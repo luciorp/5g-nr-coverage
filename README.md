@@ -6,26 +6,28 @@ relevo (terreno) e parâmetros reais de rádio.
 
 ## Modelo matemático
 
-RSRP(dBm) = P_tx + G_antena(azimute, elevação) − FSPL − L_difração_relevo − L_clutter
+RSRP(dBm) = P_tx + G_antena(azimute, elevação) − PL_3GPP(cenário) − L_difração_relevo
 
-- **FSPL** (perda de espaço livre): ITU-R P.525.
-- **L_difração_relevo**: perda por obstrução de terreno, calculada a partir do
-  perfil de elevação (SRTM) entre a antena e cada ponto, usando o parâmetro de
-  Fresnel-Kirchhoff e a aproximação de difração de gume-de-faca da ITU-R P.526
-  (§4.1), escolhendo o ponto de pior obstrução ao longo do perfil (construção
-  tipo Bullington, ITU-R P.526 §4.3).
+- **PL_3GPP**: perda de percurso por cenário (3GPP TR 38.901, Tabela 7.4.1-1),
+  modelos **RMa** (rural/suburbano) e **UMa** (urbano/urbano denso), com
+  perda esperada combinando LOS/NLOS pela probabilidade de cada cenário. Já
+  inclui a perda de espaço livre e o clutter médio esperado do ambiente —
+  substitui tanto o FSPL quanto um offset fixo de clutter, e escala
+  corretamente com a distância (ver `coverage_tool/clutter_3gpp.py`).
+- **L_difração_relevo**: perda adicional por obstrução de terreno (morros,
+  vales), calculada a partir do perfil de elevação (SRTM) entre a antena e
+  cada ponto, usando o parâmetro de Fresnel-Kirchhoff e a aproximação de
+  difração de gume-de-faca da ITU-R P.526 (§4.1), escolhendo o ponto de pior
+  obstrução ao longo do perfil (construção tipo Bullington, ITU-R P.526
+  §4.3). Somada à parte porque RMa/UMa assumem terreno essencialmente plano.
 - **G_antena**: padrão de antena setorizada do 3GPP TR 38.901 (Tabela 7.3-1),
   parametrizado por azimute, downtilt e larguras de feixe horizontal/vertical.
-- **L_clutter**: offset típico de perda por ambiente (rural/suburbano/
-  urbano/urbano denso) — simplificação de planejamento; não substitui um
-  modelo estatístico completo (ex.: 3GPP 38.901 UMa/RMa, Okumura-Hata).
 
-Essa combinação segue a mesma lógica usada por ferramentas conhecidas de
-predição de cobertura baseadas em terreno (SPLAT!, Radio Mobile), com o
-padrão de antena e as bandas alinhados ao 5G NR (3GPP). O ITU-R P.1812 é a
-recomendação mais completa/precisa para esse tipo de predição, mas exige
-dezenas de fatores de correção adicionais — fora do escopo de um script
-enxuto como este.
+O ITU-R P.1812 é a recomendação mais completa/precisa para esse tipo de
+predição, mas exige dezenas de fatores de correção adicionais — fora do
+escopo de um script enxuto como este. Detalhes das fórmulas RMa/UMa e o
+impacto de trocar um offset fixo por um modelo estatístico real estão no
+[guia completo](docs/GUIDE.md#como-o-modelo-funciona).
 
 ## Dados de terreno e mapa
 
@@ -83,7 +85,7 @@ onidirecional da Alpha Wireless):
 | `--antenna-gain-dbi` | Ganho da antena (dBi) — use o ganho da antena passiva externa do datasheet |
 | `--azimuth-deg` / `--downtilt-deg` | Apontamento do setor |
 | `--h-beamwidth-deg` / `--v-beamwidth-deg` | Largura de feixe (use `0` para onidirecional) |
-| `--environment` | `rural`, `suburban`, `urban`, `dense_urban` |
+| `--environment` | `rural`, `suburban`, `urban`, `dense_urban` — define o cenário 3GPP (RMa ou UMa) usado na perda de percurso |
 | `--radius-km` / `--resolution` | Área e resolução da grade de cobertura |
 | `--terrain-resolution` | Resolução da grade de elevação (relevo) |
 | `--no-terrain` | Desliga o relevo (mais rápido, funciona offline) |
@@ -100,7 +102,12 @@ Rode `python -m coverage_tool.cli --help` para a lista completa.
 
 ## Limitações conhecidas
 
-- Modelo de clutter é um offset fixo por ambiente, não estatístico.
+- `dense_urban` não é um cenário separado na 3GPP TR 38.901 — usa UMa com
+  uma margem extra fixa de 4 dB (heurística documentada, não parte da
+  especificação).
+- LOS/NLOS é combinado por probabilidade esperada (não sorteado por ponto),
+  então o mapa não tem a variabilidade de shadow fading real — é uma média,
+  não um valor com margem de confiança de cobertura.
 - Difração considera apenas o pior obstáculo do perfil (single knife-edge),
   não múltiplos obstáculos (ITU-R P.526 §4.5) nem efeitos de multipercurso.
 - Em mmWave (bandas n257/n258/n260/n261) a difração por relevo é pouco

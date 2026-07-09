@@ -1,16 +1,16 @@
 """Modelo de propagação híbrido para cobertura 5G NR:
 
-  RSRP(dBm) = P_tx(dBm) + G_antena(phi,theta) - FSPL - L_difracao - L_clutter
+  RSRP(dBm) = P_tx(dBm) + G_antena(phi,theta) - PL_3GPP(cenario) - L_difracao_relevo
 
 Referências:
-  - FSPL: ITU-R P.525
+  - Perda de percurso por cenário (LOS/NLOS, RMa/UMa): 3GPP TR 38.901
+    Tabela 7.4.1-1 — já inclui a perda de espaço livre e o clutter urbano
+    médio esperado para o ambiente escolhido (ver coverage_tool/clutter_3gpp.py).
   - Difração de gume-de-faca (perda adicional por obstrução de relevo):
     ITU-R P.526 §4.1, com escolha do ponto de pior obstrução ao longo do
-    perfil (construção tipo Bullington, ITU-R P.526 §4.3).
+    perfil (construção tipo Bullington, ITU-R P.526 §4.3). Somada à parte
+    porque RMa/UMa assumem terreno essencialmente plano.
   - Padrão de antena setorizada: 3GPP TR 38.901 Tabela 7.3-1.
-  - Perda de clutter: offset típico de planejamento por tipo de ambiente
-    (simplificação; não substitui um modelo estatístico completo tipo
-    Okumura-Hata / 3GPP 38.901 UMa-RMa).
 """
 from __future__ import annotations
 
@@ -19,21 +19,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .clutter_3gpp import pathloss_db
 from .terrain import haversine_m
 
 C_LIGHT = 299_792_458.0  # m/s
-
-CLUTTER_LOSS_DB = {
-    "rural": 0.0,
-    "suburban": 5.0,
-    "urban": 10.0,
-    "dense_urban": 16.0,
-}
-
-
-def fspl_db(distance_m: np.ndarray, freq_mhz: float) -> np.ndarray:
-    d_km = np.maximum(distance_m, 1.0) / 1000.0
-    return 32.44 + 20 * np.log10(d_km) + 20 * np.log10(freq_mhz)
 
 
 def knife_edge_diffraction_loss_db(
@@ -139,7 +128,7 @@ def rsrp_grid(
     n = flat_lat.size
 
     distances = np.array([haversine_m(tx_lat, tx_lon, la, lo) for la, lo in zip(flat_lat, flat_lon)])
-    loss_fspl = fspl_db(distances, link.freq_mhz)
+    loss_pl = pathloss_db(link.environment, distances, link.tx_height_m, link.rx_height_m, link.freq_mhz / 1000.0)
 
     loss_diff = np.array([
         knife_edge_diffraction_loss_db(
@@ -153,7 +142,5 @@ def rsrp_grid(
         ant, tx_lat, tx_lon, link.tx_height_m, flat_lat, flat_lon, link.rx_height_m, distances
     )
 
-    clutter_db = CLUTTER_LOSS_DB.get(link.environment, 5.0)
-
-    rsrp = link.tx_power_dbm + gain - loss_fspl - loss_diff - clutter_db
+    rsrp = link.tx_power_dbm + gain - loss_pl - loss_diff
     return rsrp.reshape(shape)

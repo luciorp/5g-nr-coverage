@@ -83,21 +83,72 @@ métrica padrão de qualidade de sinal em LTE/5G NR) em cada ponto de uma
 grade ao redor da antena:
 
 ```
-RSRP(dBm) = P_tx + G_antena(φ, θ) − FSPL − L_difração − L_clutter
+RSRP(dBm) = P_tx + G_antena(φ, θ) − PL_3GPP(cenário) − L_difração
 ```
 
 ### P_tx — potência de transmissão
 
 Potência entregue à antena, em dBm (ou em Watts, ver `--tx-power-w`).
 
-### FSPL — perda de espaço livre (ITU-R P.525)
+### PL_3GPP — perda de percurso por cenário (3GPP TR 38.901, Tabela 7.4.1-1)
+
+Substitui tanto a perda de espaço livre quanto um offset fixo de clutter
+por um modelo que já escala com distância, frequência e ambiente. A
+ferramenta usa dois cenários da especificação, conforme `--environment`:
+
+| `--environment` | Cenário 3GPP | Morfologia assumida |
+|---|---|---|
+| `rural` | **RMa** (Rural Macro) | prédios baixos (5m), ruas largas (25m) |
+| `suburban` | **RMa** (Rural Macro) | prédios um pouco mais altos (10m), ruas 20m |
+| `urban` | **UMa** (Urban Macro) | — |
+| `dense_urban` | **UMa** (Urban Macro) | + margem extra de 4 dB (heurística; a 38.901 não define um cenário "dense urban" separado) |
+
+Cada cenário define uma fórmula de perda **LOS** e outra **NLOS**:
 
 ```
-FSPL(dB) = 32.44 + 20·log₁₀(d_km) + 20·log₁₀(f_MHz)
+RMa-LOS (d2D ≤ dBP):
+  PL₁ = 20·log₁₀(40πd₃D·fc/3) + min(0.03h^1.72,10)·log₁₀(d₃D)
+        − min(0.044h^1.72,14.77) + 0.002·log₁₀(h)·d₃D
+
+RMa-NLOS:
+  PL = 161.04 − 7.1·log₁₀(W) + 7.5·log₁₀(h)
+       − (24.37 − 3.7(h/h_BS)²)·log₁₀(h_BS)
+       + (43.42 − 3.1·log₁₀(h_BS))·(log₁₀(d₃D) − 3)
+       + 20·log₁₀(fc) − (3.2·(log₁₀(11.75·h_UT))² − 4.97)
+
+UMa-LOS (d2D ≤ dBP'):
+  PL₁ = 28.0 + 22·log₁₀(d₃D) + 20·log₁₀(fc)
+
+UMa-NLOS:
+  PL = 13.54 + 39.08·log₁₀(d₃D) + 20·log₁₀(fc) − 0.6·(h_UT − 1.5)
 ```
 
-Perda que o sinal sofreria no vácuo, sem nenhum obstáculo — a base de
-qualquer link budget de rádio.
+(`fc` em GHz, distâncias em metros, `h`/`W` = altura de prédio/largura de
+rua assumidas, `h_BS`/`h_UT` = altura da antena/receptor, `dBP`/`dBP'` =
+distância de breakpoint de cada cenário — fórmulas completas em
+[`coverage_tool/clutter_3gpp.py`](../coverage_tool/clutter_3gpp.py)).
+
+Em vez de sortear LOS ou NLOS por ponto (o que introduziria ruído
+aleatório num mapa hoje determinístico), a ferramenta pondera as duas
+pela **probabilidade de LOS** de cada cenário (também definida na 38.901,
+função da distância e, no caso UMa, da altura do receptor):
+
+```
+PL = P_LOS(d) · PL_LOS(d) + (1 − P_LOS(d)) · PL_NLOS(d)
+```
+
+Isso é uma simplificação — a especificação não define como colapsar
+LOS/NLOS num único valor determinístico — mas evita ruído artificial no
+mapa e ainda captura a queda de sinal com a distância corretamente,
+diferente do offset fixo anterior.
+
+> **Por que isso importa:** um offset fixo (ex.: "urbano = +10 dB") não
+> escala com a distância, então subestima a perda longe da antena e
+> superestima perto dela. Trocar pelo modelo RMa/UMa reduziu o raio de
+> cobertura estimado em cenários urbanos por um fator de ~2-3x em relação
+> ao offset fixo — mudança grande, e na direção de ficar mais realista
+> (mais pessimista nas bordas, que é o comportamento esperado de
+> propagação NLOS em ambiente construído).
 
 ### L_difração — perda por obstrução de relevo (ITU-R P.526)
 
@@ -144,19 +195,6 @@ o desvio vertical em relação ao downtilt (`--downtilt-deg`). Com
 `--h-beamwidth-deg 0`, a atenuação horizontal é desativada (antena
 onidirecional).
 
-### L_clutter — perda de ambiente
-
-Offset fixo de planejamento por tipo de ambiente (não é um modelo
-estatístico completo como Okumura-Hata ou 3GPP UMa/RMa — é uma
-simplificação deliberada):
-
-| `--environment` | Perda adicional |
-|---|---|
-| `rural` | 0 dB |
-| `suburban` | 5 dB |
-| `urban` | 10 dB |
-| `dense_urban` | 16 dB |
-
 ---
 
 ## Referência completa de parâmetros
@@ -190,7 +228,7 @@ simplificação deliberada):
 | `--radius-km` | km | Raio da área simulada ao redor da antena. |
 | `--resolution` | pontos (NxN) | Densidade da grade de cobertura. Mais alto = mapa mais nítido, porém mais lento (cresce com o quadrado). |
 | `--terrain-resolution` | pontos (NxN) | Densidade da grade de elevação usada para interpolar o relevo. Independente de `--resolution`. |
-| `--environment` | enum | `rural` / `suburban` / `urban` / `dense_urban` — ver tabela de clutter acima. |
+| `--environment` | enum | `rural` / `suburban` / `urban` / `dense_urban` — define o cenário 3GPP (RMa ou UMa) usado em `PL_3GPP`, ver tabela acima. |
 | `--no-terrain` | flag | Ignora relevo (terreno plano). Mais rápido, funciona 100% offline, mas perde a modelagem de obstáculos. |
 | `--elevation-dataset` | string | Dataset da API Open-Topo-Data (padrão `srtm30m`). |
 
